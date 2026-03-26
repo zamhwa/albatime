@@ -28,12 +28,13 @@ export async function saveStore(storeId: string, store: Partial<Store>): Promise
 }
 
 export async function createStore(ownerId: string, name: string, businessType: string): Promise<string> {
-  const { data } = await supabase.from('stores').insert({
+  const { data, error } = await supabase.from('stores').insert({
     owner_id: ownerId,
     name,
     business_type: businessType,
   }).select('id').single();
-  return data!.id;
+  if (error) throw new Error(error.message);
+  return data.id;
 }
 
 // ── Workers ──

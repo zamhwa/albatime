@@ -102,10 +102,16 @@ export default function Home() {
   const handleCreateStore = async () => {
     if (!storeName.trim()) { setError('매장명을 입력해주세요'); return; }
     setSubmitting(true);
-    const storeId = await createStore(user.id, storeName, businessType);
-    await refreshStores();
-    setCurrentStore({ id: storeId, name: storeName, role: 'owner' });
-    router.push('/owner');
+    setError('');
+    try {
+      const storeId = await createStore(user.id, storeName, businessType);
+      await refreshStores();
+      setCurrentStore({ id: storeId, name: storeName, role: 'owner' });
+      router.push('/owner');
+    } catch (e: any) {
+      setError(e.message || '매장 생성에 실패했습니다');
+      setSubmitting(false);
+    }
   };
 
   const handleJoinWithCode = async () => {

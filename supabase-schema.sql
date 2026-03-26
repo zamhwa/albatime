@@ -1,6 +1,21 @@
 -- ============================================
 -- AlbaCheck Supabase Schema
+-- 기존 테이블 전체 삭제 후 실행하세요
 -- ============================================
+
+drop trigger if exists on_auth_user_created on auth.users;
+drop function if exists handle_new_user();
+drop function if exists get_store_ids_for_user(uuid);
+drop function if exists get_owner_store_ids(uuid);
+drop function if exists get_worker_ids_for_owner(uuid);
+drop table if exists sales_records cascade;
+drop table if exists contracts cascade;
+drop table if exists schedules cascade;
+drop table if exists attendances cascade;
+drop table if exists invite_codes cascade;
+drop table if exists workers cascade;
+drop table if exists stores cascade;
+drop table if exists profiles cascade;
 
 -- 1. profiles (회원)
 create table profiles (
@@ -105,6 +120,24 @@ create table sales_records (
 );
 
 -- ============================================
+-- RLS 우회용 헬퍼 함수 (security definer로 RLS 무시)
+-- ============================================
+create or replace function get_store_ids_for_user(uid uuid)
+returns setof uuid as $$
+  select store_id from workers where user_id = uid
+$$ language sql security definer set search_path = public;
+
+create or replace function get_owner_store_ids(uid uuid)
+returns setof uuid as $$
+  select id from stores where owner_id = uid
+$$ language sql security definer set search_path = public;
+
+create or replace function get_worker_ids_for_owner(uid uuid)
+returns setof uuid as $$
+  select w.id from workers w join stores s on s.id = w.store_id where s.owner_id = uid
+$$ language sql security definer set search_path = public;
+
+-- ============================================
 -- Row Level Security (RLS)
 -- ============================================
 
@@ -125,7 +158,7 @@ create policy "profiles_update" on profiles for update using (auth.uid() = id);
 -- stores: 소유자 + 소속 알바생 읽기, 소유자만 수정
 create policy "stores_select" on stores for select using (
   owner_id = auth.uid() or
-  id in (select store_id from workers where user_id = auth.uid())
+  id in (select get_store_ids_for_user(auth.uid()))
 );
 create policy "stores_insert" on stores for insert with check (owner_id = auth.uid());
 create policy "stores_update" on stores for update using (owner_id = auth.uid());
@@ -133,78 +166,78 @@ create policy "stores_delete" on stores for delete using (owner_id = auth.uid())
 
 -- workers: 매장 소유자 + 본인
 create policy "workers_select" on workers for select using (
-  store_id in (select id from stores where owner_id = auth.uid()) or
+  store_id in (select get_owner_store_ids(auth.uid())) or
   user_id = auth.uid()
 );
 create policy "workers_insert" on workers for insert with check (
-  store_id in (select id from stores where owner_id = auth.uid())
+  store_id in (select get_owner_store_ids(auth.uid()))
 );
 create policy "workers_update" on workers for update using (
-  store_id in (select id from stores where owner_id = auth.uid()) or
+  store_id in (select get_owner_store_ids(auth.uid())) or
   user_id = auth.uid()
 );
 create policy "workers_delete" on workers for delete using (
-  store_id in (select id from stores where owner_id = auth.uid())
+  store_id in (select get_owner_store_ids(auth.uid()))
 );
 
 -- invite_codes: 매장 소유자 생성, 누구나 조회 (코드로)
 create policy "invite_select" on invite_codes for select using (true);
 create policy "invite_insert" on invite_codes for insert with check (
-  store_id in (select id from stores where owner_id = auth.uid())
+  store_id in (select get_owner_store_ids(auth.uid()))
 );
 create policy "invite_update" on invite_codes for update using (true);
 
 -- attendances: 매장 소유자 + 본인 알바생
 create policy "att_select" on attendances for select using (
-  worker_id in (select id from workers where store_id in (select id from stores where owner_id = auth.uid())) or
+  worker_id in (select get_worker_ids_for_owner(auth.uid())) or
   worker_id in (select id from workers where user_id = auth.uid())
 );
 create policy "att_insert" on attendances for insert with check (
   worker_id in (select id from workers where user_id = auth.uid()) or
-  worker_id in (select id from workers where store_id in (select id from stores where owner_id = auth.uid()))
+  worker_id in (select get_worker_ids_for_owner(auth.uid()))
 );
 create policy "att_update" on attendances for update using (
   worker_id in (select id from workers where user_id = auth.uid()) or
-  worker_id in (select id from workers where store_id in (select id from stores where owner_id = auth.uid()))
+  worker_id in (select get_worker_ids_for_owner(auth.uid()))
 );
 
 -- schedules: 매장 소유자 + 본인
 create policy "sched_select" on schedules for select using (
-  worker_id in (select id from workers where store_id in (select id from stores where owner_id = auth.uid())) or
+  worker_id in (select get_worker_ids_for_owner(auth.uid())) or
   worker_id in (select id from workers where user_id = auth.uid())
 );
 create policy "sched_insert" on schedules for insert with check (
-  worker_id in (select id from workers where store_id in (select id from stores where owner_id = auth.uid()))
+  worker_id in (select get_worker_ids_for_owner(auth.uid()))
 );
 create policy "sched_update" on schedules for update using (
-  worker_id in (select id from workers where store_id in (select id from stores where owner_id = auth.uid()))
+  worker_id in (select get_worker_ids_for_owner(auth.uid()))
 );
 create policy "sched_delete" on schedules for delete using (
-  worker_id in (select id from workers where store_id in (select id from stores where owner_id = auth.uid()))
+  worker_id in (select get_worker_ids_for_owner(auth.uid()))
 );
 
 -- contracts: 매장 소유자 + 해당 알바생
 create policy "contract_select" on contracts for select using (
-  store_id in (select id from stores where owner_id = auth.uid()) or
+  store_id in (select get_owner_store_ids(auth.uid())) or
   worker_id in (select id from workers where user_id = auth.uid())
 );
 create policy "contract_insert" on contracts for insert with check (
-  store_id in (select id from stores where owner_id = auth.uid())
+  store_id in (select get_owner_store_ids(auth.uid()))
 );
 create policy "contract_update" on contracts for update using (
-  store_id in (select id from stores where owner_id = auth.uid()) or
+  store_id in (select get_owner_store_ids(auth.uid())) or
   worker_id in (select id from workers where user_id = auth.uid())
 );
 
 -- sales_records: 매장 소유자만
 create policy "sales_select" on sales_records for select using (
-  store_id in (select id from stores where owner_id = auth.uid())
+  store_id in (select get_owner_store_ids(auth.uid()))
 );
 create policy "sales_insert" on sales_records for insert with check (
-  store_id in (select id from stores where owner_id = auth.uid())
+  store_id in (select get_owner_store_ids(auth.uid()))
 );
 create policy "sales_update" on sales_records for update using (
-  store_id in (select id from stores where owner_id = auth.uid())
+  store_id in (select get_owner_store_ids(auth.uid()))
 );
 
 -- ============================================
@@ -213,11 +246,11 @@ create policy "sales_update" on sales_records for update using (
 create or replace function handle_new_user()
 returns trigger as $$
 begin
-  insert into profiles (id, email, name)
+  insert into public.profiles (id, email, name)
   values (new.id, new.email, coalesce(new.raw_user_meta_data->>'name', ''));
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 create trigger on_auth_user_created
   after insert on auth.users

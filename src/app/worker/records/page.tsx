@@ -1,24 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCurrentWorkerId, getAttendances } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkerByUserId, getAttendancesByWorker } from "@/lib/db";
 import { formatHours } from "@/lib/pay-calculator";
 import { Attendance } from "@/lib/types";
 
 export default function RecordsPage() {
+  const { currentStore, user } = useAuth();
   const [records, setRecords] = useState<Attendance[]>([]);
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
+  const [workerId, setWorkerId] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = getCurrentWorkerId();
-    if (!id) return;
-    const monthStr = `${year}-${String(month).padStart(2, '0')}`;
-    const atts = getAttendances()
-      .filter(a => a.workerId === id && a.clockIn.startsWith(monthStr))
-      .sort((a, b) => b.clockIn.localeCompare(a.clockIn));
-    setRecords(atts);
-  }, [month, year]);
+    if (!currentStore || !user) return;
+    const loadWorker = async () => {
+      const w = await getWorkerByUserId(currentStore.id, user.id);
+      if (w) setWorkerId(w.id);
+    };
+    loadWorker();
+  }, [currentStore, user]);
+
+  useEffect(() => {
+    if (!workerId) return;
+    const loadRecords = async () => {
+      const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+      const atts = await getAttendancesByWorker(workerId);
+      const filtered = atts
+        .filter(a => a.clockIn.startsWith(monthStr))
+        .sort((a, b) => b.clockIn.localeCompare(a.clockIn));
+      setRecords(filtered);
+    };
+    loadRecords();
+  }, [workerId, month, year]);
+
+  if (!currentStore || !user) return null;
 
   const totalMinutes = records.reduce((s, r) => s + r.actualWorkMinutes, 0);
   const totalDays = records.filter(r => r.clockOut).length;

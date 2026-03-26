@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getStore, getSalesRecords, saveSalesRecord, getWorkers, getAttendances, getSchedules } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getStore, getSalesRecords, saveSalesRecord, getWorkers, getAttendances, getSchedules } from "@/lib/db";
 import { calcMonthlyPay, formatWon } from "@/lib/pay-calculator";
-import { SalesRecord } from "@/lib/types";
+import { SalesRecord, Store } from "@/lib/types";
 
 const BENCHMARKS: Record<string, { min: number; max: number }> = {
   '카페': { min: 20, max: 30 },
@@ -14,6 +15,7 @@ const BENCHMARKS: Record<string, { min: number; max: number }> = {
 };
 
 export default function SalesPage() {
+  const { currentStore } = useAuth();
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [sales, setSales] = useState<SalesRecord[]>([]);
@@ -21,40 +23,50 @@ export default function SalesPage() {
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
   const [newAmount, setNewAmount] = useState('');
   const [newMemo, setNewMemo] = useState('');
+  const [store, setStore] = useState<Store | null>(null);
 
   useEffect(() => {
-    const allSales = getSalesRecords();
-    const monthStr = `${year}-${String(month).padStart(2, '0')}`;
-    setSales(allSales.filter(s => s.date.startsWith(monthStr)));
+    if (!currentStore) return;
+    const loadData = async () => {
+      const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+      const [allSales, s, workers, atts, scheds] = await Promise.all([
+        getSalesRecords(currentStore.id),
+        getStore(currentStore.id),
+        getWorkers(currentStore.id),
+        getAttendances(currentStore.id),
+        getSchedules(currentStore.id),
+      ]);
 
-    const store = getStore();
-    if (store) {
-      const workers = getWorkers().filter(w => w.status === 'active');
-      const atts = getAttendances();
-      const scheds = getSchedules();
-      let total = 0;
-      workers.forEach(w => {
-        const data = calcMonthlyPay(w, store, atts, scheds, year, month);
-        total += data.totalPay;
-      });
-      setTotalLabor(total);
-    }
-  }, [year, month]);
+      setSales(allSales.filter(s => s.date.startsWith(monthStr)));
+      setStore(s);
+
+      if (s) {
+        const activeWorkers = workers.filter(w => w.status === 'active');
+        let total = 0;
+        activeWorkers.forEach(w => {
+          const data = calcMonthlyPay(w, s, atts, scheds, year, month);
+          total += data.totalPay;
+        });
+        setTotalLabor(total);
+      }
+    };
+    loadData();
+  }, [currentStore, year, month]);
 
   const totalSales = sales.reduce((s, r) => s + r.amount, 0);
   const laborRatio = totalSales > 0 ? (totalLabor / totalSales) * 100 : 0;
 
-  const store = getStore();
   const benchmark = BENCHMARKS[store?.businessType || '기타'];
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
+    if (!currentStore) return;
     const amount = parseInt(newAmount);
     if (!amount || amount <= 0) { alert('매출액을 입력해주세요'); return; }
-    saveSalesRecord({ date: newDate, amount, memo: newMemo });
+    await saveSalesRecord(currentStore.id, { date: newDate, amount, memo: newMemo });
     setNewAmount('');
     setNewMemo('');
     // reload
-    const allSales = getSalesRecords();
+    const allSales = await getSalesRecords(currentStore.id);
     const monthStr = `${year}-${String(month).padStart(2, '0')}`;
     setSales(allSales.filter(s => s.date.startsWith(monthStr)));
   };
@@ -72,6 +84,8 @@ export default function SalesPage() {
     if (laborRatio <= benchmark.max) return '적정';
     return '초과';
   };
+
+  if (!currentStore) return null;
 
   return (
     <div className="space-y-4">

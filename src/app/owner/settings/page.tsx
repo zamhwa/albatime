@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getStore, saveStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getStore, saveStore } from "@/lib/db";
 import { Store, StoreOptions, BreakRule } from "@/lib/types";
 
 export default function SettingsPage() {
+  const { currentStore } = useAuth();
   const [store, setStore] = useState<Store | null>(null);
   const [name, setName] = useState('');
   const [businessType, setBusinessType] = useState('카페');
@@ -21,19 +23,24 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const s = getStore();
-    if (s) {
-      setStore(s);
-      setName(s.name);
-      setBusinessType(s.businessType);
-      setPayPeriodStart(s.payPeriodStart);
-      setOptions(s.options);
-      setBreakRules(s.breakRules);
-    }
-  }, []);
+    if (!currentStore) return;
+    const loadData = async () => {
+      const s = await getStore(currentStore.id);
+      if (s) {
+        setStore(s);
+        setName(s.name);
+        setBusinessType(s.businessType);
+        setPayPeriodStart(s.payPeriodStart);
+        setOptions(s.options);
+        setBreakRules(s.breakRules);
+      }
+    };
+    loadData();
+  }, [currentStore]);
 
-  const handleSave = () => {
-    saveStore({ name, businessType, payPeriodStart, options, breakRules });
+  const handleSave = async () => {
+    if (!currentStore) return;
+    await saveStore(currentStore.id, { name, businessType, payPeriodStart, options, breakRules });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -41,6 +48,8 @@ export default function SettingsPage() {
   const updateOption = (key: keyof StoreOptions, value: boolean | number | string) => {
     setOptions(prev => ({ ...prev, [key]: value }));
   };
+
+  if (!currentStore) return null;
 
   return (
     <div className="space-y-4">

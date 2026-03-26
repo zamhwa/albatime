@@ -2,27 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { getQrSecret, getStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getQrSecret, getStore } from "@/lib/db";
+import { Store } from "@/lib/types";
 
 export default function QRPage() {
+  const { currentStore } = useAuth();
   const [qrValue, setQrValue] = useState("");
   const [countdown, setCountdown] = useState(30);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [store, setStore] = useState<Store | null>(null);
 
-  const generateQR = () => {
-    const store = getStore();
-    const secret = getQrSecret();
+  useEffect(() => {
+    if (!currentStore) return;
+    getStore(currentStore.id).then(setStore);
+  }, [currentStore]);
+
+  const generateQR = async () => {
+    if (!currentStore) return;
+    const secret = await getQrSecret(currentStore.id);
     const timestamp = Math.floor(Date.now() / 30000) * 30000;
     const nonce = Math.random().toString(36).substring(2, 10);
-    const payload = JSON.stringify({ s: store?.id || '', t: timestamp, n: nonce, k: secret });
+    const payload = JSON.stringify({ s: currentStore.id, t: timestamp, n: nonce, k: secret });
     setQrValue(btoa(payload));
     setCountdown(30);
   };
 
-  useEffect(() => { generateQR(); const i = setInterval(generateQR, 30000); return () => clearInterval(i); }, []);
+  useEffect(() => {
+    if (!currentStore) return;
+    generateQR();
+    const i = setInterval(generateQR, 30000);
+    return () => clearInterval(i);
+  }, [currentStore]);
+
   useEffect(() => { const t = setInterval(() => setCountdown(p => p > 0 ? p - 1 : 30), 1000); return () => clearInterval(t); }, []);
 
-  const store = getStore();
+  if (!currentStore) return null;
 
   if (isFullscreen) {
     return (

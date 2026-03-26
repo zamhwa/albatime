@@ -1,32 +1,42 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCurrentWorkerId, getWorker, getStore, getAttendances, getSchedules } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkerByUserId, getStore, getAttendancesByWorker, getSchedulesByWorker } from "@/lib/db";
 import { calcMonthlyPay, formatWon } from "@/lib/pay-calculator";
-import { Worker } from "@/lib/types";
+import { Worker, Store } from "@/lib/types";
 
 export default function WorkerPayPage() {
+  const { currentStore, user } = useAuth();
   const [worker, setWorker] = useState<Worker | null>(null);
+  const [store, setStore] = useState<Store | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [payData, setPayData] = useState<ReturnType<typeof calcMonthlyPay> | null>(null);
 
   useEffect(() => {
-    const id = getCurrentWorkerId();
-    if (!id) return;
-    const w = getWorker(id);
-    setWorker(w || null);
-  }, []);
+    if (!currentStore || !user) return;
+    const loadWorkerAndStore = async () => {
+      const w = await getWorkerByUserId(currentStore.id, user.id);
+      setWorker(w || null);
+      const s = await getStore(currentStore.id);
+      setStore(s);
+    };
+    loadWorkerAndStore();
+  }, [currentStore, user]);
 
   useEffect(() => {
-    if (!worker) return;
-    const store = getStore();
-    if (!store) return;
-    const data = calcMonthlyPay(worker, store, getAttendances(), getSchedules(), year, month);
-    setPayData(data);
-  }, [worker, year, month]);
+    if (!worker || !store) return;
+    const loadPayData = async () => {
+      const atts = await getAttendancesByWorker(worker.id);
+      const scheds = await getSchedulesByWorker(worker.id);
+      const data = calcMonthlyPay(worker, store, atts, scheds, year, month);
+      setPayData(data);
+    };
+    loadPayData();
+  }, [worker, store, year, month]);
 
-  const store = getStore();
+  if (!currentStore || !user) return null;
 
   return (
     <div className="space-y-4">

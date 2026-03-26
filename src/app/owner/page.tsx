@@ -1,32 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getStore, getWorkers, getAttendances, getSchedules } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getStore, getWorkers, getAttendances, getSchedules, createInviteCode } from "@/lib/db";
 import { calcWeeklySummary, getMonday, formatWon } from "@/lib/pay-calculator";
 import { Store, Worker, Attendance } from "@/lib/types";
 import Link from "next/link";
 
 export default function OwnerDashboard() {
+  const { currentStore } = useAuth();
   const [store, setStore] = useState<Store | null>(null);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [todayAtts, setTodayAtts] = useState<Attendance[]>([]);
   const [weeklyPay, setWeeklyPay] = useState(0);
   const [holidayNames, setHolidayNames] = useState<string[]>([]);
-  const [mounted, setMounted] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
+  const [showInvite, setShowInvite] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    const s = getStore();
-    const w = getWorkers().filter(w => w.status === 'active');
+    if (!currentStore) return;
+    loadData();
+  }, [currentStore]);
+
+  const loadData = async () => {
+    const storeId = currentStore!.id;
+    const s = await getStore(storeId);
+    const w = (await getWorkers(storeId)).filter(w => w.status === 'active');
+    const allAtts = await getAttendances(storeId);
+    const allScheds = await getSchedules(storeId);
     const today = new Date().toISOString().split('T')[0];
+
     setStore(s);
     setWorkers(w);
-    setTodayAtts(getAttendances().filter(a => a.clockIn.startsWith(today)));
+    setTodayAtts(allAtts.filter(a => a.clockIn.startsWith(today)));
 
     if (s) {
       const monday = getMonday(new Date());
-      const allAtts = getAttendances();
-      const allScheds = getSchedules();
       let total = 0;
       const names: string[] = [];
       w.forEach(worker => {
@@ -37,9 +46,15 @@ export default function OwnerDashboard() {
       setWeeklyPay(total);
       setHolidayNames(names);
     }
-  }, []);
+  };
 
-  if (!mounted) return null;
+  const handleCreateInvite = async () => {
+    const code = await createInviteCode(currentStore!.id);
+    setInviteCode(code);
+    setShowInvite(true);
+  };
+
+  if (!currentStore) return null;
 
   const getStatus = (id: string) => {
     const att = todayAtts.find(a => a.workerId === id);
@@ -61,7 +76,7 @@ export default function OwnerDashboard() {
       <div className="rounded-2xl p-6 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)' }}>
         <div className="absolute top-0 right-0 w-40 h-40 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(20%, -30%)' }} />
         <p className="text-indigo-200 text-xs font-medium">{dateStr}</p>
-        <h1 className="text-2xl font-extrabold mt-1">{store?.name || '매장'}</h1>
+        <h1 className="text-2xl font-extrabold mt-1">{store?.name || currentStore.name}</h1>
         <div className="flex gap-8 mt-5">
           <div>
             <p className="text-indigo-200 text-[10px] uppercase tracking-wider">알바생</p>
@@ -75,22 +90,40 @@ export default function OwnerDashboard() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-2 gap-3">
-        <Link href="/owner/qr" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md hover:-translate-y-0.5 transition-all text-center group">
-          <div className="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center mx-auto mb-3 group-hover:bg-indigo-100 transition">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>
+      <div className="grid grid-cols-3 gap-3">
+        <Link href="/owner/qr" className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition text-center">
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center mx-auto mb-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           </div>
-          <p className="font-bold text-sm text-gray-800">QR 표시</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">출퇴근 체크</p>
+          <p className="font-bold text-xs text-gray-800">QR 표시</p>
         </Link>
-        <Link href="/owner/workers" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md hover:-translate-y-0.5 transition-all text-center group">
-          <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center mx-auto mb-3 group-hover:bg-emerald-100 transition">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
+        <Link href="/owner/workers" className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition text-center">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center mx-auto mb-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
           </div>
-          <p className="font-bold text-sm text-gray-800">알바생 추가</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">직원 관리</p>
+          <p className="font-bold text-xs text-gray-800">알바생</p>
         </Link>
+        <button onClick={handleCreateInvite} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition text-center">
+          <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center mx-auto mb-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+          </div>
+          <p className="font-bold text-xs text-gray-800">초대코드</p>
+        </button>
       </div>
+
+      {/* Invite Code Modal */}
+      {showInvite && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-center">
+          <p className="text-sm text-amber-700 font-medium mb-2">알바생 초대코드</p>
+          <p className="text-3xl font-extrabold tracking-[0.3em] text-amber-800">{inviteCode}</p>
+          <p className="text-xs text-amber-500 mt-2">7일간 유효 · 알바생에게 이 코드를 전달하세요</p>
+          <button onClick={() => { navigator.clipboard?.writeText(inviteCode); alert('복사됨!'); }}
+            className="mt-3 text-xs bg-amber-200 text-amber-800 px-4 py-1.5 rounded-lg font-medium">
+            코드 복사
+          </button>
+          <button onClick={() => setShowInvite(false)} className="block mx-auto mt-2 text-xs text-amber-500">닫기</button>
+        </div>
+      )}
 
       {/* Today */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -109,7 +142,7 @@ export default function OwnerDashboard() {
               const { label, cls } = getStatus(w.id);
               const time = getTime(w.id);
               return (
-                <div key={w.id} className="flex items-center justify-between px-5 py-3 hover:bg-gray-50/50 transition">
+                <div key={w.id} className="flex items-center justify-between px-5 py-3">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold shadow-sm" style={{ background: w.color }}>
                       {w.name[0]}

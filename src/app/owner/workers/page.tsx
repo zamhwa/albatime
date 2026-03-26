@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWorkers, saveWorker, deleteWorker } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkers, saveWorker, deleteWorker } from "@/lib/db";
 import { Worker, WorkerAllowances } from "@/lib/types";
 import { formatWon } from "@/lib/pay-calculator";
 
 export default function WorkersPage() {
+  const { currentStore } = useAuth();
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -22,23 +24,26 @@ export default function WorkersPage() {
   });
 
   useEffect(() => {
-    setWorkers(getWorkers());
-  }, []);
+    if (!currentStore) return;
+    getWorkers(currentStore.id).then(setWorkers);
+  }, [currentStore]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (!currentStore) return;
     if (!name.trim()) { alert('이름을 입력해주세요'); return; }
     if (wageType === 'hourly') {
       const wageNum = parseInt(wage) || 10030;
       if (wageNum < 10030) {
         if (!confirm('2026년 최저시급(10,030원) 미만입니다. 계속하시겠습니까?')) return;
       }
-      saveWorker({ id: editId || undefined, name, phone, wageType, hourlyWage: wageNum, monthlyWage: 0, allowances });
+      await saveWorker(currentStore.id, { id: editId || undefined, name, phone, wageType, hourlyWage: wageNum, monthlyWage: 0, allowances });
     } else {
       const mWage = parseInt(monthlyWage) || 0;
       if (mWage <= 0) { alert('월급을 입력해주세요'); return; }
-      saveWorker({ id: editId || undefined, name, phone, wageType, hourlyWage: 0, monthlyWage: mWage, allowances });
+      await saveWorker(currentStore.id, { id: editId || undefined, name, phone, wageType, hourlyWage: 0, monthlyWage: mWage, allowances });
     }
-    setWorkers(getWorkers());
+    const updated = await getWorkers(currentStore.id);
+    setWorkers(updated);
     resetForm();
   };
 
@@ -58,10 +63,12 @@ export default function WorkersPage() {
     setShowForm(true);
   };
 
-  const handleDelete = (id: string, workerName: string) => {
+  const handleDelete = async (id: string, workerName: string) => {
+    if (!currentStore) return;
     if (confirm(`${workerName}을(를) 삭제하시겠습니까?`)) {
-      deleteWorker(id);
-      setWorkers(getWorkers());
+      await deleteWorker(id);
+      const updated = await getWorkers(currentStore.id);
+      setWorkers(updated);
     }
   };
 
@@ -99,6 +106,8 @@ export default function WorkersPage() {
     if (a.holidayPay) tags.push('휴일');
     return tags;
   };
+
+  if (!currentStore) return null;
 
   return (
     <div className="space-y-4">

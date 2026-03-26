@@ -1,20 +1,29 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getCurrentWorkerId, getWorker, getAttendances, saveAttendance, getStore, getQrSecret } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkerByUserId, getAttendancesByWorker, saveAttendance, getStore, getQrSecret } from "@/lib/db";
 import { calcBreakMinutes, calcActualMinutes } from "@/lib/pay-calculator";
+import { Worker } from "@/lib/types";
 
 export default function ScanPage() {
+  const { currentStore, user } = useAuth();
   const [status, setStatus] = useState<'ready' | 'success' | 'error'>('ready');
   const [message, setMessage] = useState('');
   const [scannerReady, setScannerReady] = useState(false);
   const scannerRef = useRef<HTMLDivElement>(null);
   const html5QrRef = useRef<any>(null);
+  const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
-    let scanner: any = null;
+    if (!currentStore || !user) return;
 
-    const initScanner = async () => {
+    const init = async () => {
+      const w = await getWorkerByUserId(currentStore.id, user.id);
+      if (!w) return;
+      workerRef.current = w;
+
+      let scanner: any = null;
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
         scanner = new Html5Qrcode('qr-reader');
@@ -37,20 +46,21 @@ export default function ScanPage() {
       }
     };
 
-    initScanner();
+    init();
 
     return () => {
       if (html5QrRef.current) {
         html5QrRef.current.stop().catch(() => {});
       }
     };
-  }, []);
+  }, [currentStore, user]);
 
-  const handleScan = (data: string) => {
+  const handleScan = async (data: string) => {
     try {
+      if (!currentStore) return;
       const payload = JSON.parse(atob(data));
-      const secret = getQrSecret();
-      const store = getStore();
+      const secret = await getQrSecret(currentStore.id);
+      const store = await getStore(currentStore.id);
 
       // Verify QR
       if (payload.k !== secret) {
@@ -67,18 +77,15 @@ export default function ScanPage() {
         return;
       }
 
-      const workerId = getCurrentWorkerId();
-      if (!workerId) {
+      const worker = workerRef.current;
+      if (!worker) {
         setStatus('error');
         setMessage('로그인 정보를 찾을 수 없습니다');
         return;
       }
 
-      const worker = getWorker(workerId);
-      if (!worker) return;
-
       const today = new Date().toISOString().split('T')[0];
-      const todayAtts = getAttendances().filter(a => a.workerId === workerId && a.clockIn.startsWith(today));
+      const todayAtts = (await getAttendancesByWorker(worker.id)).filter(a => a.clockIn.startsWith(today));
       const openAtt = todayAtts.find(a => !a.clockOut);
 
       if (openAtt) {
@@ -88,7 +95,7 @@ export default function ScanPage() {
         const breakMin = store ? calcBreakMinutes(totalMin, store.breakRules) : 0;
         const actualMin = store ? calcActualMinutes(openAtt.clockIn, clockOut, breakMin, store.options.roundingRule) : totalMin - breakMin;
 
-        saveAttendance({
+        await saveAttendance({
           ...openAtt,
           clockOut,
           breakMinutes: breakMin,
@@ -102,8 +109,8 @@ export default function ScanPage() {
         setMessage(`퇴근 완료! (${time})\n실근무: ${hours}시간 ${mins}분`);
       } else {
         // 출근 처리
-        saveAttendance({
-          workerId,
+        await saveAttendance({
+          workerId: worker.id,
           clockIn: new Date().toISOString(),
           clockOut: null,
           breakMinutes: 0,
@@ -126,6 +133,8 @@ export default function ScanPage() {
     setMessage('');
     window.location.reload();
   };
+
+  if (!currentStore || !user) return null;
 
   return (
     <div className="space-y-4">

@@ -1,129 +1,201 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { getRole, setRole, getStore, saveStore, getWorkers, setCurrentWorkerId } from "@/lib/store";
+import { useState } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { createStore, useInviteCode } from "@/lib/db";
 
 export default function Home() {
   const router = useRouter();
-  const [step, setStep] = useState<'role' | 'setup' | 'worker-select'>('role');
+  const { user, profile, stores, currentStore, setCurrentStore, loading, signUp, signIn, signOut, refreshStores } = useAuth();
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  // 매장 생성
+  const [showCreate, setShowCreate] = useState(false);
   const [storeName, setStoreName] = useState('');
   const [businessType, setBusinessType] = useState('카페');
-  const [selectedWorker, setSelectedWorker] = useState('');
-  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-    const role = getRole();
-    if (role === 'owner' && getStore()) router.push('/owner');
-    else if (role === 'worker') router.push('/worker');
-  }, [router]);
+  // 초대코드
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
 
-  if (!mounted) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+        <div className="text-white text-lg">로딩중...</div>
+      </div>
+    );
+  }
 
-  const handleOwner = () => {
-    if (getStore()) { setRole('owner'); router.push('/owner'); }
-    else setStep('setup');
-  };
+  // 로그인 상태 + 매장 선택 완료 → 이동
+  if (user && currentStore) {
+    router.push(currentStore.role === 'owner' ? '/owner' : '/worker');
+    return null;
+  }
 
-  const handleWorker = () => {
-    const workers = getWorkers();
-    if (workers.length === 0) { alert('등록된 알바생이 없습니다.\n사장님이 먼저 매장을 설정해주세요.'); return; }
-    setStep('worker-select');
-  };
+  // ── 로그인/회원가입 폼 ──
+  if (!user) {
+    const handleAuth = async () => {
+      setError('');
+      setSubmitting(true);
+      if (mode === 'signup') {
+        if (!name.trim()) { setError('이름을 입력해주세요'); setSubmitting(false); return; }
+        const { error: e } = await signUp(email, password, name);
+        if (e) setError(e);
+      } else {
+        const { error: e } = await signIn(email, password);
+        if (e) setError(e);
+      }
+      setSubmitting(false);
+    };
 
-  const handleStoreSetup = () => {
-    if (!storeName.trim()) { alert('매장명을 입력해주세요'); return; }
-    saveStore({ name: storeName, businessType });
-    setRole('owner');
+    return (
+      <div className="min-h-screen flex items-center justify-center p-5" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+          <div className="pt-12 pb-6 px-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-200">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            </div>
+            <h1 className="text-2xl font-extrabold text-gray-900">알바체크</h1>
+            <p className="text-gray-400 text-sm mt-1">QR 출퇴근 & 급여관리</p>
+          </div>
+
+          <div className="px-8 pb-10 space-y-4">
+            {/* 탭 */}
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              <button onClick={() => setMode('login')} className={`flex-1 py-2 text-sm font-medium ${mode === 'login' ? 'bg-indigo-600 text-white' : 'text-gray-500'}`}>
+                로그인
+              </button>
+              <button onClick={() => setMode('signup')} className={`flex-1 py-2 text-sm font-medium ${mode === 'signup' ? 'bg-indigo-600 text-white' : 'text-gray-500'}`}>
+                회원가입
+              </button>
+            </div>
+
+            {mode === 'signup' && (
+              <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="이름"
+                className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+            )}
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="이메일"
+              className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="비밀번호 (6자 이상)"
+              onKeyDown={e => e.key === 'Enter' && handleAuth()}
+              className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+
+            {error && <p className="text-red-500 text-xs text-center">{error}</p>}
+
+            <button onClick={handleAuth} disabled={submitting}
+              className="w-full bg-indigo-600 text-white py-3 rounded-2xl font-bold hover:bg-indigo-700 disabled:opacity-50 shadow-lg shadow-indigo-100">
+              {submitting ? '처리중...' : mode === 'login' ? '로그인' : '가입하기'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 로그인 완료, 매장 선택/생성/참여 ──
+  const handleCreateStore = async () => {
+    if (!storeName.trim()) { setError('매장명을 입력해주세요'); return; }
+    setSubmitting(true);
+    const storeId = await createStore(user.id, storeName, businessType);
+    await refreshStores();
+    setCurrentStore({ id: storeId, name: storeName, role: 'owner' });
     router.push('/owner');
   };
 
-  const handleWorkerLogin = () => {
-    if (!selectedWorker) { alert('알바생을 선택해주세요'); return; }
-    setRole('worker');
-    setCurrentWorkerId(selectedWorker);
+  const handleJoinWithCode = async () => {
+    if (!inviteCode.trim()) { setError('초대코드를 입력해주세요'); return; }
+    setSubmitting(true);
+    const result = await useInviteCode(inviteCode, user.id);
+    if (!result.success) { setError(result.error!); setSubmitting(false); return; }
+    await refreshStores();
+    setCurrentStore({ id: result.storeId!, name: '', role: 'worker' });
     router.push('/worker');
   };
 
-  const workers = typeof window !== 'undefined' ? getWorkers() : [];
-
   return (
     <div className="min-h-screen flex items-center justify-center p-5" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in">
-        {/* Logo */}
-        <div className="pt-12 pb-8 px-8 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-200">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          </div>
-          <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">알바체크</h1>
-          <p className="text-gray-400 text-sm mt-1">QR 출퇴근 & 급여관리</p>
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className="pt-10 pb-4 px-8 text-center">
+          <h2 className="text-xl font-bold text-gray-900">안녕하세요, {profile?.name || ''}님</h2>
+          <p className="text-gray-400 text-sm mt-1">{profile?.email}</p>
         </div>
 
-        <div className="px-8 pb-10">
-          {step === 'role' && (
-            <div className="space-y-3">
-              <button onClick={handleOwner}
-                className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-base hover:bg-indigo-700 shadow-lg shadow-indigo-100 flex items-center justify-center gap-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                사장님 (관리자)
-              </button>
-              <button onClick={handleWorker}
-                className="w-full bg-emerald-500 text-white py-4 rounded-2xl font-bold text-base hover:bg-emerald-600 shadow-lg shadow-emerald-100 flex items-center justify-center gap-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 0 0-8 0v2"/></svg>
-                알바생
-              </button>
-            </div>
-          )}
-
-          {step === 'setup' && (
-            <div className="space-y-5 animate-in">
-              <h2 className="text-lg font-bold text-center text-gray-800">매장 설정</h2>
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">매장명</label>
-                <input type="text" value={storeName} onChange={e => setStoreName(e.target.value)}
-                  placeholder="예: 스타벅스 강남점"
-                  className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none placeholder:text-gray-300" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">업종</label>
-                <select value={businessType} onChange={e => setBusinessType(e.target.value)}
-                  className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                  <option>카페</option><option>음식점</option><option>편의점</option><option>소매점</option><option>기타</option>
-                </select>
-              </div>
-              <button onClick={handleStoreSetup} className="w-full bg-indigo-600 text-white py-3.5 rounded-2xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">
-                시작하기
-              </button>
-              <button onClick={() => setStep('role')} className="w-full text-gray-400 py-2 text-sm hover:text-gray-600">뒤로</button>
-            </div>
-          )}
-
-          {step === 'worker-select' && (
-            <div className="space-y-4 animate-in">
-              <h2 className="text-lg font-bold text-center text-gray-800">알바생 선택</h2>
-              <div className="space-y-2 max-h-52 overflow-y-auto">
-                {workers.map(w => (
-                  <button key={w.id} onClick={() => setSelectedWorker(w.id)}
-                    className={`w-full text-left px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 ${
-                      selectedWorker === w.id ? 'border-emerald-500 bg-emerald-50' : 'border-gray-100 hover:border-gray-200'
-                    }`}>
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{ background: w.color }}>
-                      {w.name[0]}
-                    </div>
+        <div className="px-8 pb-10 space-y-3">
+          {/* 기존 매장 목록 */}
+          {stores.length > 0 && (
+            <div className="space-y-2 mb-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase">내 매장</p>
+              {stores.map(s => (
+                <button key={s.id} onClick={() => { setCurrentStore(s); router.push(s.role === 'owner' ? '/owner' : '/worker'); }}
+                  className="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-semibold text-sm">{w.name}</p>
-                      <p className="text-gray-400 text-xs">{w.phone}</p>
+                      <p className="font-semibold text-sm">{s.name}</p>
+                      <p className="text-xs text-gray-400">{s.role === 'owner' ? '사장님' : '알바생'}</p>
                     </div>
-                  </button>
-                ))}
-              </div>
-              <button onClick={handleWorkerLogin} className="w-full bg-emerald-500 text-white py-3.5 rounded-2xl font-bold hover:bg-emerald-600 shadow-lg shadow-emerald-100">
-                로그인
-              </button>
-              <button onClick={() => setStep('role')} className="w-full text-gray-400 py-2 text-sm hover:text-gray-600">뒤로</button>
+                    <span className="text-gray-400">→</span>
+                  </div>
+                </button>
+              ))}
             </div>
           )}
+
+          {/* 매장 만들기 */}
+          {!showCreate && !showInvite && (
+            <>
+              <button onClick={() => setShowCreate(true)}
+                className="w-full bg-indigo-600 text-white py-3.5 rounded-2xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">
+                매장 만들기 (사장님)
+              </button>
+              <button onClick={() => setShowInvite(true)}
+                className="w-full bg-emerald-500 text-white py-3.5 rounded-2xl font-bold hover:bg-emerald-600 shadow-lg shadow-emerald-100">
+                초대코드로 참여 (알바생)
+              </button>
+            </>
+          )}
+
+          {/* 매장 생성 폼 */}
+          {showCreate && (
+            <div className="space-y-3">
+              <input type="text" value={storeName} onChange={e => setStoreName(e.target.value)} placeholder="매장명 (예: 스타벅스 강남점)"
+                className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+              <select value={businessType} onChange={e => setBusinessType(e.target.value)}
+                className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option>카페</option><option>음식점</option><option>편의점</option><option>소매점</option><option>기타</option>
+              </select>
+              {error && <p className="text-red-500 text-xs">{error}</p>}
+              <button onClick={handleCreateStore} disabled={submitting}
+                className="w-full bg-indigo-600 text-white py-3 rounded-2xl font-bold hover:bg-indigo-700 disabled:opacity-50">
+                {submitting ? '생성중...' : '매장 생성'}
+              </button>
+              <button onClick={() => { setShowCreate(false); setError(''); }} className="w-full text-gray-400 py-2 text-sm">취소</button>
+            </div>
+          )}
+
+          {/* 초대코드 폼 */}
+          {showInvite && (
+            <div className="space-y-3">
+              <input type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value.toUpperCase())} placeholder="초대코드 6자리"
+                maxLength={6}
+                className="w-full bg-gray-50 border-0 rounded-xl px-4 py-3 text-sm text-center tracking-[0.3em] font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
+              {error && <p className="text-red-500 text-xs text-center">{error}</p>}
+              <button onClick={handleJoinWithCode} disabled={submitting}
+                className="w-full bg-emerald-500 text-white py-3 rounded-2xl font-bold hover:bg-emerald-600 disabled:opacity-50">
+                {submitting ? '참여중...' : '참여하기'}
+              </button>
+              <button onClick={() => { setShowInvite(false); setError(''); }} className="w-full text-gray-400 py-2 text-sm">취소</button>
+            </div>
+          )}
+
+          <button onClick={signOut} className="w-full text-gray-400 py-2 text-sm hover:text-red-500">
+            로그아웃
+          </button>
         </div>
       </div>
     </div>

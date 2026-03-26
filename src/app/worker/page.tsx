@@ -1,40 +1,51 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCurrentWorkerId, getWorker, getAttendances, getSchedules, getStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkerByUserId, getAttendancesByWorker, getSchedulesByWorker, getStore } from "@/lib/db";
 import { calcMonthlyPay, formatWon } from "@/lib/pay-calculator";
 import { Worker, Attendance, Schedule } from "@/lib/types";
 import Link from "next/link";
 
 export default function WorkerDashboard() {
+  const { currentStore, user } = useAuth();
   const [worker, setWorker] = useState<Worker | null>(null);
   const [todayAtt, setTodayAtt] = useState<Attendance | null>(null);
   const [nextSchedule, setNextSchedule] = useState<Schedule | null>(null);
   const [monthlyPay, setMonthlyPay] = useState(0);
 
   useEffect(() => {
-    const id = getCurrentWorkerId();
-    if (!id) return;
-    const w = getWorker(id);
-    if (!w) return;
-    setWorker(w);
+    if (!currentStore || !user) return;
 
-    const today = new Date().toISOString().split('T')[0];
-    const atts = getAttendances().filter(a => a.workerId === id);
-    const todayRecord = atts.find(a => a.clockIn.startsWith(today));
-    setTodayAtt(todayRecord || null);
+    const loadData = async () => {
+      const w = await getWorkerByUserId(currentStore.id, user.id);
+      if (!w) return;
+      setWorker(w);
 
-    const schedules = getSchedules().filter(s => s.workerId === id && s.date >= today);
-    schedules.sort((a, b) => a.date.localeCompare(b.date));
-    setNextSchedule(schedules[0] || null);
+      const today = new Date().toISOString().split('T')[0];
+      const atts = await getAttendancesByWorker(w.id);
+      const todayRecord = atts.find(a => a.clockIn.startsWith(today));
+      setTodayAtt(todayRecord || null);
 
-    const store = getStore();
-    if (store) {
-      const now = new Date();
-      const data = calcMonthlyPay(w, store, getAttendances(), getSchedules(), now.getFullYear(), now.getMonth() + 1);
-      setMonthlyPay(data.totalPay);
-    }
-  }, []);
+      const schedules = await getSchedulesByWorker(w.id);
+      const upcoming = schedules.filter(s => s.date >= today);
+      upcoming.sort((a, b) => a.date.localeCompare(b.date));
+      setNextSchedule(upcoming[0] || null);
+
+      const store = await getStore(currentStore.id);
+      if (store) {
+        const now = new Date();
+        const allAtts = await getAttendancesByWorker(w.id);
+        const allScheds = await getSchedulesByWorker(w.id);
+        const data = calcMonthlyPay(w, store, allAtts, allScheds, now.getFullYear(), now.getMonth() + 1);
+        setMonthlyPay(data.totalPay);
+      }
+    };
+
+    loadData();
+  }, [currentStore, user]);
+
+  if (!currentStore || !user) return null;
 
   const getStatus = () => {
     if (!todayAtt) return { text: '출근 전', color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' };

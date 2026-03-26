@@ -1,20 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCurrentWorkerId, getSchedules } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkerByUserId, getSchedulesByWorker } from "@/lib/db";
 import { Schedule } from "@/lib/types";
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 export default function WorkerSchedulePage() {
+  const { currentStore, user } = useAuth();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [weekOffset, setWeekOffset] = useState(0);
 
   useEffect(() => {
-    const id = getCurrentWorkerId();
-    if (!id) return;
-    setSchedules(getSchedules().filter(s => s.workerId === id));
-  }, []);
+    if (!currentStore || !user) return;
+    const loadData = async () => {
+      const w = await getWorkerByUserId(currentStore.id, user.id);
+      if (!w) return;
+      const scheds = await getSchedulesByWorker(w.id);
+      setSchedules(scheds);
+    };
+    loadData();
+  }, [currentStore, user]);
+
+  if (!currentStore || !user) return null;
 
   const getWeekDates = (): string[] => {
     const d = new Date();

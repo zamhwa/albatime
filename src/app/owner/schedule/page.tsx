@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWorkers, getSchedules, getStore, saveSchedule, deleteSchedule } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkers, getSchedules, getStore, saveSchedule, deleteSchedule } from "@/lib/db";
 import { Worker, Schedule, Store } from "@/lib/types";
 import { calcEstimatedWeeklyLaborCost, formatWon } from "@/lib/pay-calculator";
 
@@ -20,6 +21,7 @@ function getWeekDates(baseDate: Date): string[] {
 }
 
 export default function SchedulePage() {
+  const { currentStore } = useAuth();
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [store, setStore] = useState<Store | null>(null);
@@ -29,10 +31,19 @@ export default function SchedulePage() {
   const [formData, setFormData] = useState({ workerId: '', date: '', startTime: '09:00', endTime: '18:00' });
 
   useEffect(() => {
-    setWorkers(getWorkers().filter(w => w.status === 'active'));
-    setStore(getStore());
-    reload();
-  }, []);
+    if (!currentStore) return;
+    const loadData = async () => {
+      const [w, s, scheds] = await Promise.all([
+        getWorkers(currentStore.id),
+        getStore(currentStore.id),
+        getSchedules(currentStore.id),
+      ]);
+      setWorkers(w.filter(w => w.status === 'active'));
+      setStore(s);
+      setSchedules(scheds);
+    };
+    loadData();
+  }, [currentStore]);
 
   useEffect(() => {
     const base = new Date();
@@ -41,18 +52,22 @@ export default function SchedulePage() {
     setWeekDates(dates);
   }, [weekOffset]);
 
-  const reload = () => setSchedules(getSchedules());
+  const reload = async () => {
+    if (!currentStore) return;
+    const scheds = await getSchedules(currentStore.id);
+    setSchedules(scheds);
+  };
 
   const getScheduleFor = (workerId: string, date: string): Schedule | undefined => {
     return schedules.find(s => s.workerId === workerId && s.date === date);
   };
 
-  const handleCellClick = (workerId: string, date: string) => {
+  const handleCellClick = async (workerId: string, date: string) => {
     const existing = getScheduleFor(workerId, date);
     if (existing) {
       if (confirm('이 스케줄을 삭제하시겠습니까?')) {
-        deleteSchedule(existing.id);
-        reload();
+        await deleteSchedule(existing.id);
+        await reload();
       }
       return;
     }
@@ -60,9 +75,9 @@ export default function SchedulePage() {
     setShowForm(true);
   };
 
-  const handleSaveSchedule = () => {
-    saveSchedule(formData);
-    reload();
+  const handleSaveSchedule = async () => {
+    await saveSchedule(formData);
+    await reload();
     setShowForm(false);
   };
 
@@ -79,26 +94,26 @@ export default function SchedulePage() {
     return total / 60;
   };
 
-  const copyToNextWeek = () => {
+  const copyToNextWeek = async () => {
     const nextWeekDates = weekDates.map(d => {
       const date = new Date(d);
       date.setDate(date.getDate() + 7);
       return date.toISOString().split('T')[0];
     });
 
-    workers.forEach(w => {
-      weekDates.forEach((date, i) => {
-        const s = getScheduleFor(w.id, date);
+    for (const w of workers) {
+      for (let i = 0; i < weekDates.length; i++) {
+        const s = getScheduleFor(w.id, weekDates[i]);
         if (s) {
           const existing = schedules.find(x => x.workerId === w.id && x.date === nextWeekDates[i]);
           if (!existing) {
-            saveSchedule({ workerId: w.id, date: nextWeekDates[i], startTime: s.startTime, endTime: s.endTime });
+            await saveSchedule({ workerId: w.id, date: nextWeekDates[i], startTime: s.startTime, endTime: s.endTime });
           }
         }
-      });
-    });
+      }
+    }
     alert('다음 주에 복사했습니다!');
-    reload();
+    await reload();
   };
 
   // 예상 인건비 계산
@@ -109,6 +124,8 @@ export default function SchedulePage() {
   const weekLabel = weekDates.length > 0
     ? `${weekDates[0].slice(5)} ~ ${weekDates[6].slice(5)}`
     : '';
+
+  if (!currentStore) return null;
 
   return (
     <div className="space-y-4">

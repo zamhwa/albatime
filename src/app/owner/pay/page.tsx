@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWorkers, getStore, getAttendances, getSchedules } from "@/lib/store";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkers, getStore, getAttendances, getSchedules } from "@/lib/db";
 import { calcMonthlyPay, calcWeeklyHolidayPay, calcEstimatedWeeklyLaborCost, formatWon, getMonday } from "@/lib/pay-calculator";
-import { Worker, Store } from "@/lib/types";
+import { Worker, Store, Schedule, Attendance } from "@/lib/types";
 
 function getWeekDates(baseDate: Date): string[] {
   const d = new Date(baseDate);
@@ -18,38 +19,48 @@ function getWeekDates(baseDate: Date): string[] {
 }
 
 export default function PayPage() {
+  const { currentStore } = useAuth();
   const [store, setStore] = useState<Store | null>(null);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [payData, setPayData] = useState<Record<string, ReturnType<typeof calcMonthlyPay>>>({});
+  const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
+  const [allAttendances, setAllAttendances] = useState<Attendance[]>([]);
 
   useEffect(() => {
-    const s = getStore();
-    const w = getWorkers().filter(w => w.status === 'active');
-    setStore(s);
-    setWorkers(w);
-  }, []);
+    if (!currentStore) return;
+    const loadData = async () => {
+      const [s, w, atts, scheds] = await Promise.all([
+        getStore(currentStore.id),
+        getWorkers(currentStore.id),
+        getAttendances(currentStore.id),
+        getSchedules(currentStore.id),
+      ]);
+      setStore(s);
+      setWorkers(w.filter(w => w.status === 'active'));
+      setAllAttendances(atts);
+      setAllSchedules(scheds);
+    };
+    loadData();
+  }, [currentStore]);
 
   useEffect(() => {
     if (!store) return;
-    const atts = getAttendances();
-    const scheds = getSchedules();
     const data: Record<string, ReturnType<typeof calcMonthlyPay>> = {};
     workers.forEach(w => {
-      data[w.id] = calcMonthlyPay(w, store, atts, scheds, year, month);
+      data[w.id] = calcMonthlyPay(w, store, allAttendances, allSchedules, year, month);
     });
     setPayData(data);
-  }, [store, workers, year, month]);
+  }, [store, workers, year, month, allAttendances, allSchedules]);
 
   const totalAll = Object.values(payData).reduce((s, d) => s + d.totalPay, 0);
 
   // 예상 월 인건비 (스케줄 기반)
   const estimatedMonthly = (() => {
     if (!store) return 0;
-    const scheds = getSchedules();
     const weekDates = getWeekDates(new Date());
-    const cost = calcEstimatedWeeklyLaborCost(workers, store, scheds, weekDates);
+    const cost = calcEstimatedWeeklyLaborCost(workers, store, allSchedules, weekDates);
     return Math.round(cost.total * 4.345);
   })();
 
@@ -58,10 +69,9 @@ export default function PayPage() {
 
   const getWeeklyHolidayInfo = () => {
     const monday = getMonday(new Date());
-    const scheds = getSchedules();
     return workers.map(w => {
       const allowances = w.allowances || { weeklyHolidayPay: true, nightPay: true, overtimePay: true, holidayPay: true };
-      const weekScheds = scheds.filter(s => {
+      const weekScheds = allSchedules.filter(s => {
         const weekStart = new Date(monday);
         const weekEnd = new Date(monday);
         weekEnd.setDate(weekEnd.getDate() + 6);
@@ -81,6 +91,8 @@ export default function PayPage() {
       return { worker: w, hours, holidayPay, isOver15: hours >= 15, allowances };
     });
   };
+
+  if (!currentStore) return null;
 
   return (
     <div className="space-y-4">

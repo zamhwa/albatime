@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { getWorkers, getContracts, saveContract, getStore } from "@/lib/store";
-import { Worker, Contract } from "@/lib/types";
+import { useAuth } from "@/lib/auth-context";
+import { getWorkers, getContracts, saveContract, getStore } from "@/lib/db";
+import { Worker, Contract, Store } from "@/lib/types";
 
 const WORK_DAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 export default function ContractPage() {
+  const { currentStore } = useAuth();
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [store, setStore] = useState<Store | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [viewContract, setViewContract] = useState<Contract | null>(null);
   const [form, setForm] = useState({
@@ -22,17 +25,26 @@ export default function ContractPage() {
   const [isDrawing, setIsDrawing] = useState(false);
 
   useEffect(() => {
-    setWorkers(getWorkers());
-    setContracts(getContracts());
-  }, []);
+    if (!currentStore) return;
+    const loadData = async () => {
+      const [w, c, s] = await Promise.all([
+        getWorkers(currentStore.id),
+        getContracts(currentStore.id),
+        getStore(currentStore.id),
+      ]);
+      setWorkers(w);
+      setContracts(c);
+      setStore(s);
+    };
+    loadData();
+  }, [currentStore]);
 
-  const store = getStore();
-
-  const handleCreate = () => {
+  const handleCreate = async () => {
+    if (!currentStore) return;
     if (!form.workerId) { alert('알바생을 선택해주세요'); return; }
     if (!form.startDate) { alert('계약 시작일을 입력해주세요'); return; }
     const worker = workers.find(w => w.id === form.workerId);
-    saveContract({
+    await saveContract(currentStore.id, {
       workerId: form.workerId,
       startDate: form.startDate,
       endDate: form.endDate || null,
@@ -46,7 +58,8 @@ export default function ContractPage() {
       payMethod: form.payMethod,
       status: 'draft',
     });
-    setContracts(getContracts());
+    const updated = await getContracts(currentStore.id);
+    setContracts(updated);
     setShowForm(false);
   };
 
@@ -57,12 +70,14 @@ export default function ContractPage() {
     }));
   };
 
-  const handleSign = (contract: Contract) => {
+  const handleSign = async (contract: Contract) => {
+    if (!currentStore) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const signature = canvas.toDataURL();
-    saveContract({ ...contract, ownerSignature: signature, signedAt: new Date().toISOString(), status: 'signed' });
-    setContracts(getContracts());
+    await saveContract(currentStore.id, { ...contract, ownerSignature: signature, signedAt: new Date().toISOString(), status: 'signed' });
+    const updated = await getContracts(currentStore.id);
+    setContracts(updated);
     setViewContract(null);
   };
 
@@ -103,6 +118,8 @@ export default function ContractPage() {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
+
+  if (!currentStore) return null;
 
   return (
     <div className="space-y-4">

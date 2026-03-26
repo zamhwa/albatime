@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { getWorkerByUserId, getAttendancesByWorker, saveAttendance, getStore, getQrSecret } from "@/lib/db";
+import { getWorkerByUserId, getAttendancesByWorker, saveAttendance, getStore, verifyQrSecret } from "@/lib/db";
 import { calcBreakMinutes, calcActualMinutes } from "@/lib/pay-calculator";
 import { Worker } from "@/lib/types";
 
@@ -59,11 +59,11 @@ export default function ScanPage() {
     try {
       if (!currentStore) return;
       const payload = JSON.parse(atob(data));
-      const secret = await getQrSecret(currentStore.id);
       const store = await getStore(currentStore.id);
 
-      // Verify QR
-      if (payload.k !== secret) {
+      // Verify QR (RLS 우회 함수 사용)
+      const valid = await verifyQrSecret(currentStore.id, payload.k);
+      if (!valid) {
         setStatus('error');
         setMessage('유효하지 않은 QR코드입니다');
         return;

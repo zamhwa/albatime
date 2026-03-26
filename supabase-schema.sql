@@ -8,6 +8,7 @@ drop function if exists handle_new_user();
 drop function if exists get_store_ids_for_user(uuid);
 drop function if exists get_owner_store_ids(uuid);
 drop function if exists get_worker_ids_for_owner(uuid);
+drop function if exists verify_qr_secret(uuid, text);
 drop table if exists sales_records cascade;
 drop table if exists contracts cascade;
 drop table if exists schedules cascade;
@@ -135,6 +136,11 @@ $$ language sql security definer set search_path = public;
 create or replace function get_worker_ids_for_owner(uid uuid)
 returns setof uuid as $$
   select w.id from workers w join stores s on s.id = w.store_id where s.owner_id = uid
+$$ language sql security definer set search_path = public;
+
+create or replace function verify_qr_secret(store_id uuid, secret text)
+returns boolean as $$
+  select exists (select 1 from stores where id = store_id and qr_secret = secret)
 $$ language sql security definer set search_path = public;
 
 -- ============================================

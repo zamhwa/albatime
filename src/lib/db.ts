@@ -335,6 +335,11 @@ export async function getQrSecret(storeId: string): Promise<string> {
   return data?.qr_secret || '';
 }
 
+export async function verifyQrSecret(storeId: string, secret: string): Promise<boolean> {
+  const { data } = await supabase.rpc('verify_qr_secret', { store_id: storeId, secret });
+  return data === true;
+}
+
 // ── Invite Codes ──
 function generateCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
